@@ -58,7 +58,7 @@ const Signup = () => {
         <div className="text-center mb-8">
           <Link to="/" className="inline-flex items-center space-x-2 hover:opacity-80 transition-opacity">
             <Brain className="w-10 h-10 text-green-400" />
-            <span className="text-3xl font-bold text-white">StudyMate AI</span>
+            <span className="text-3xl font-bold text-white">Docu Genie</span>
           </Link>
         </div>
 

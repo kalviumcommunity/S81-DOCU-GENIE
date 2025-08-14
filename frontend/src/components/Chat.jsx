@@ -22,7 +22,7 @@ const Chat = () => {
   const [messages, setMessages] = useState([
     {
       id: '1',
-      content: "Hello! I'm StudyMate AI. Upload your study materials and I'll help you understand them better. What would you like to study today?",
+      content: "Hello! I'm Docu Genie. Upload your documents and I'll help you understand them better. What would you like to know about your files today?",
       sender: 'ai',
       timestamp: new Date()
     }
@@ -135,7 +135,7 @@ const Chat = () => {
         setMessages(mapped.length > 0 ? mapped : [
           {
             id: '1',
-            content: "Hello! I'm StudyMate AI. Upload your study materials and I'll help you understand them better. What would you like to study today?",
+            content: "Hello! I'm Docu Genie. Upload your documents and I'll help you understand them better. What would you like to know about your files today?",
             sender: 'ai',
             timestamp: new Date()
           }
@@ -146,7 +146,7 @@ const Chat = () => {
         setMessages([
           {
             id: '1',
-            content: "Hello! I'm StudyMate AI. Upload your study materials and I'll help you understand them better. What would you like to study today?",
+            content: "Hello! I'm Docu Genie. Upload your documents and I'll help you understand them better. What would you like to know about your files today?",
             sender: 'ai',
             timestamp: new Date()
           }
@@ -335,7 +335,7 @@ const Chat = () => {
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center space-x-2">
               <Brain className="w-8 h-8 text-green-400" />
-              <span className="text-xl font-bold">StudyMate AI</span>
+              <span className="text-xl font-bold">Docu Genie</span>
             </div>
             <button
               onClick={() => setSidebarOpen(false)}
