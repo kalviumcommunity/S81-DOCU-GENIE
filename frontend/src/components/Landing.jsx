@@ -9,7 +9,7 @@ const Landing = () => {
       <nav className="flex justify-between items-center p-6 md:p-8">
         <div className="flex items-center space-x-2">
           <Brain className="w-8 h-8 text-green-400" />
-          <span className="text-2xl font-bold">StudyMate AI</span>
+          <span className="text-2xl font-bold">Docu Genie</span>
         </div>
         <div className="space-x-4">
           <Link
@@ -33,7 +33,7 @@ const Landing = () => {
           <div className="mb-8">
             <Brain className="w-20 h-20 text-green-400 mx-auto mb-6 animate-pulse" />
             <h1 className="text-5xl md:text-7xl font-bold mb-6 bg-gradient-to-r from-white via-gray-100 to-green-400 bg-clip-text text-transparent">
-              StudyMate AI
+              Docu Genie
             </h1>
             <p className="text-xl md:text-2xl text-gray-300 mb-12 font-light">
               Upload Notes. Get Answers. Study Smart.
