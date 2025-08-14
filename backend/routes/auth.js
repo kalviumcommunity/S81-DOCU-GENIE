@@ -1,4 +1,5 @@
 import express from 'express';
+import passport from '../middleware/googleAuth.js';
 import bcrypt from 'bcryptjs';
 import { body, validationResult } from 'express-validator';
 import { dbUtils } from '../config/database.js';
@@ -6,6 +7,20 @@ import { generateToken } from '../middleware/auth.js';
 import { asyncHandler, AppError } from '../middleware/errorHandler.js';
 
 const router = express.Router();
+
+// Google OAuth routes
+router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+
+router.get('/google/callback',
+  passport.authenticate('google', { failureRedirect: '/login', session: true }),
+  (req, res) => {
+    // Successful authentication, generate JWT token and redirect to chat page
+    const userId = req.user && req.user.id ? req.user.id : '';
+    const token = generateToken(userId);
+    // Redirect to frontend with userId and token
+    res.redirect(`http://localhost:5173/chat?userId=${userId}&token=${token}`);
+  }
+);
 
 // Validation middleware
 const validateRegistration = [

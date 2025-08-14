@@ -53,6 +53,13 @@ const Landing = () => {
             >
               Get Started
             </Link>
+            <button
+              onClick={() => window.location.href = 'http://localhost:3001/api/auth/google'}
+              className="px-8 py-4 bg-white text-gray-800 font-semibold rounded-lg flex items-center justify-center gap-2 shadow hover:bg-gray-100 transition-all duration-200 min-w-[160px]"
+            >
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier" strokeWidth="0"></g><g id="SVGRepo_tracerCarrier" strokeLinecap="round" strokeLinejoin="round"></g><g id="SVGRepo_iconCarrier"><path d="M21.805 10.023C21.917 10.568 22 11.174 22 11.826C22 16.07 19.204 19 14.999 19C11.13 19 8 15.87 8 12C8 8.13 11.13 5 14.999 5C16.657 5 18.157 5.633 19.293 6.707L16.999 9H22V3.999L19.293 6.707C17.157 4.633 14.999 3 11.999 3C6.477 3 2 7.477 2 13C2 18.523 6.477 23 11.999 23C17.522 23 22 18.523 22 13C22 12.348 21.917 11.742 21.805 11.197L21.805 10.023Z" fill="#4285F4"></path></g></svg>
+              Sign in with Google
+            </button>
           </div>
 
           {/* Features Grid */}

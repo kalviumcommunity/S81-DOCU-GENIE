@@ -1,11 +1,14 @@
+import dotenv from 'dotenv';
+dotenv.config();
 import express from 'express';
+import session from 'express-session';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
-import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import passport from './middleware/googleAuth.js';
 
 // Import routes
 import authRoutes from './routes/auth.js';
@@ -20,8 +23,10 @@ import { authenticateToken } from './middleware/auth.js';
 // Import database initialization
 import { initializeDatabase } from './config/database.js';
 
-// Load environment variables
-dotenv.config();
+// Ensure Google OAuth credentials are present
+if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+  console.error('❌ Google OAuth credentials missing in .env file');
+}
 
 // Debug environment variables
 console.log('🔍 Environment variables loaded:');
@@ -36,6 +41,16 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+// Express session setup (required for passport)
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'your_session_secret',
+  resave: false,
+  saveUninitialized: false
+}));
+
+// Initialize passport
+app.use(passport.initialize());
+app.use(passport.session());
 const PORT = process.env.PORT || 3001;
 
 // Security middleware

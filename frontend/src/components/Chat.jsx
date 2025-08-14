@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { 
   Send, 
   Upload, 
@@ -19,6 +19,9 @@ import {
 import apiService from '../services/api';
 
 const Chat = () => {
+  const location = useLocation();
+  const queryParams = new URLSearchParams(location.search);
+  const userId = queryParams.get('userId');
   const [messages, setMessages] = useState([
     {
       id: '1',
@@ -52,13 +55,32 @@ const Chat = () => {
   }, [messages]);
 
   useEffect(() => {
+    // If redirected from Google, set authentication and store JWT token
+    const token = queryParams.get('token');
+    if (userId && token) {
+      // Set all required localStorage items before navigation
+      localStorage.setItem('googleUserId', userId);
+      localStorage.setItem('isAuthenticated', 'true');
+      localStorage.setItem('token', token);
+      setTimeout(() => {
+        navigate('/chat', { replace: true });
+      }, 100); // Ensure localStorage is set before navigation
+      return;
+    }
+
+    // Robust authentication check
     const isAuth = localStorage.getItem('isAuthenticated');
-    if (!isAuth) {
-      navigate('/login');
+    const googleId = localStorage.getItem('googleUserId');
+    const jwtToken = localStorage.getItem('token');
+    if ((!isAuth && !googleId) || !jwtToken) {
+      // Show loading spinner briefly before redirecting to login
+      setTimeout(() => {
+        navigate('/login');
+      }, 100);
     } else {
       loadFiles();
     }
-  }, [navigate]);
+  }, [navigate, userId]);
 
   const loadFiles = async () => {
     try {
