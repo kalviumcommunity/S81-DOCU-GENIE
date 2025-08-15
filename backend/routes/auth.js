@@ -18,7 +18,7 @@ router.get('/google/callback',
     const userId = req.user && req.user.id ? req.user.id : '';
     const token = generateToken(userId);
     // Redirect to frontend with userId and token
-    res.redirect(`http://localhost:5173/chat?userId=${userId}&token=${token}`);
+    res.redirect(`${process.env.FRONTEND_URL}/chat?userId=${userId}&token=${token}`);
   }
 );
 
