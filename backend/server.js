@@ -1,3 +1,7 @@
+// Health check endpoint for uptime monitoring
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
 import dotenv from 'dotenv';
 dotenv.config();
 import express from 'express';
