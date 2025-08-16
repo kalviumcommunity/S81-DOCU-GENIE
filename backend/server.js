@@ -67,7 +67,11 @@ app.use(limiter);
 
 // CORS configuration
 app.use(cors({
-  origin: `https://${process.env.FRONTEND_URL}` || 'http://localhost:5173',
+  origin: [
+    'http://localhost:5173',
+    `https://${process.env.FRONTEND_URL}`,
+    `https://${process.env.FRONTEND_URL}/`,
+  ],
   credentials: true
 }));
 
