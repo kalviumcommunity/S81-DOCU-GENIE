@@ -86,14 +86,6 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // Static file serving for uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development'
-  });
-});
 
 // API routes
 app.use('/api/auth', authRoutes);
@@ -109,10 +101,9 @@ app.use('*', (req, res) => {
   });
 });
 
-// Error handling middleware
+
 app.use(errorHandler);
 
-// Initialize database and start server
 const startServer = async () => {
   try {
     await initializeDatabase();
