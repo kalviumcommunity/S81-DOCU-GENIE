@@ -2,12 +2,15 @@ import dotenv from 'dotenv';
 dotenv.config();
 import passport from 'passport';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
+import crypto from 'crypto';
 import { dbUtils } from '../config/database.js';
 
 passport.use(new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: '/api/auth/google/callback',
+    callbackURL: process.env.NODE_ENV === 'production' 
+      ? 'https://s81-docu-genie.onrender.com/api/auth/google/callback'
+      : 'http://localhost:3001/api/auth/google/callback',
   },
   async (accessToken, refreshToken, profile, done) => {
     try {
@@ -19,10 +22,11 @@ passport.use(new GoogleStrategy({
       }
       let user = await dbUtils.getUserByEmail(email);
       if (!user) {
+        const oauthSentinel = `OAUTH_${crypto.randomBytes(32).toString('hex')}`;
         const userId = await dbUtils.createUser(
           profile.displayName,
           email,
-          '' // Use empty string for password_hash
+          oauthSentinel // Use random sentinel instead of empty string
         );
         user = await dbUtils.getUserById(userId);
       }

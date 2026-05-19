@@ -48,9 +48,6 @@ const debugConfig = () => {
 // Generate AI response using OpenRouter
 export const generateDocumentResponse = async (query, documentId, conversationHistory = []) => {
   try {
-    // Debug configuration on first use
-    debugConfig();
-    
     // Search for relevant chunks in the document
     let relevantChunks = [];
     try {
@@ -262,7 +259,7 @@ Please provide a helpful educational response in a conversational, professional 
     
     return {
       response: "I'm sorry, I encountered an error while processing your question. Please try again.",
-      sources: error.message,
+      sources: [],
       confidence: 0,
       error: error.message
     };

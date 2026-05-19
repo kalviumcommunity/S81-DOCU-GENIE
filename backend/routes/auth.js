@@ -1,12 +1,14 @@
 import express from 'express';
 import passport from '../middleware/googleAuth.js';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { body, validationResult } from 'express-validator';
 import { dbUtils } from '../config/database.js';
 import { generateToken } from '../middleware/auth.js';
 import { asyncHandler, AppError } from '../middleware/errorHandler.js';
 
 const router = express.Router();
+const oauthCodes = new Map(); // In-memory store (or Redis in prod)
 
 // Google OAuth routes
 router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
@@ -14,13 +16,29 @@ router.get('/google', passport.authenticate('google', { scope: ['profile', 'emai
 router.get('/google/callback',
   passport.authenticate('google', { failureRedirect: '/login', session: true }),
   (req, res) => {
-    // Successful authentication, generate JWT token and redirect to chat page
-    const userId = req.user && req.user.id ? req.user.id : '';
-    const token = generateToken(userId);
-    // Redirect to frontend with userId and token
-    res.redirect(`${process.env.FRONTEND_URL}/chat?userId=${userId}&token=${token}`);
+    const code = crypto.randomBytes(32).toString('hex');
+    oauthCodes.set(code, { userId: req.user.id, expiresAt: Date.now() + 60000 }); // 60s TTL
+    
+    const frontendUrl = process.env.NODE_ENV === 'production' 
+      ? 'https://docugenie-ai.netlify.app'
+      : 'http://localhost:5173'; // Make sure your local frontend is on 5173 or 5174
+      
+    res.redirect(`${frontendUrl}/chat?code=${code}`);
   }
 );
+
+// Add new endpoint: GET /api/auth/exchange
+router.get('/exchange', asyncHandler(async (req, res) => {
+  const { code } = req.query;
+  const entry = oauthCodes.get(code);
+  if (!entry || Date.now() > entry.expiresAt) {
+    return res.status(401).json({ error: 'Invalid or expired code' });
+  }
+  oauthCodes.delete(code);
+  const token = generateToken(entry.userId);
+  const user = await dbUtils.getUserById(entry.userId);
+  res.json({ token, user: { id: user.id, username: user.username, email: user.email } });
+}));
 
 // Validation middleware
 const validateRegistration = [
@@ -59,10 +77,7 @@ const validateLogin = [
 // Register new user
 router.post('/register', validateRegistration, asyncHandler(async (req, res) => {
   // Log the incoming request for debugging
-  console.log('🔍 Registration request received:', {
-    body: req.body,
-    headers: req.headers
-  });
+  console.log('🔍 Registration request received for email:', req.body.email);
   
   // Check validation errors
   const errors = validationResult(req);
@@ -108,10 +123,7 @@ router.post('/register', validateRegistration, asyncHandler(async (req, res) => 
 // Login user
 router.post('/login', validateLogin, asyncHandler(async (req, res) => {
   // Log the incoming request for debugging
-  console.log('🔍 Login request received:', {
-    body: req.body,
-    headers: req.headers
-  });
+  console.log('🔍 Login request received for email:', req.body.email);
   
   // Check validation errors
   const errors = validationResult(req);

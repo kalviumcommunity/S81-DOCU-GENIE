@@ -96,7 +96,7 @@ router.post('/message', validateMessage, asyncHandler(async (req, res) => {
     await dbUtils.createMessage(currentConversationId, 'assistant', aiResult.response);
 
     // Update conversation timestamp
-    await dbUtils.updateConversation(currentConversationId, null);
+    await dbUtils.touchConversation(currentConversationId);
 
     res.json({
       message: aiResult.response,
@@ -150,8 +150,7 @@ router.get('/conversations/:id/messages', asyncHandler(async (req, res) => {
   }
 
   // Verify conversation belongs to user
-  const conversations = await dbUtils.getConversationsByUserId(req.user.id);
-  const conversation = conversations.find(c => c.id === conversationId);
+  const conversation = await dbUtils.getConversationByIdAndUserId(conversationId, req.user.id);
   
   if (!conversation) {
     throw new AppError('Conversation not found', 404, 'CONVERSATION_NOT_FOUND');
@@ -234,8 +233,7 @@ router.delete('/conversations/:id', asyncHandler(async (req, res) => {
   }
 
   // Verify conversation belongs to user
-  const conversations = await dbUtils.getConversationsByUserId(req.user.id);
-  const conversation = conversations.find(c => c.id === conversationId);
+  const conversation = await dbUtils.getConversationByIdAndUserId(conversationId, req.user.id);
   
   if (!conversation) {
     throw new AppError('Conversation not found', 404, 'CONVERSATION_NOT_FOUND');
@@ -263,14 +261,13 @@ router.patch('/conversations/:id', asyncHandler(async (req, res) => {
   }
 
   // Verify conversation belongs to user
-  const conversations = await dbUtils.getConversationsByUserId(req.user.id);
-  const conversation = conversations.find(c => c.id === conversationId);
+  const conversation = await dbUtils.getConversationByIdAndUserId(conversationId, req.user.id);
   
   if (!conversation) {
     throw new AppError('Conversation not found', 404, 'CONVERSATION_NOT_FOUND');
   }
 
-  await dbUtils.updateConversation(conversationId, title.trim());
+  await dbUtils.updateConversationTitle(conversationId, title.trim());
 
   res.json({
     message: 'Conversation title updated successfully',

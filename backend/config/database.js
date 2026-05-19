@@ -59,6 +59,7 @@ export const initializeDatabase = async () => {
         username TEXT UNIQUE NOT NULL,
         email TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
+        auth_provider TEXT DEFAULT 'local',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
@@ -75,6 +76,8 @@ export const initializeDatabase = async () => {
         file_size INTEGER NOT NULL,
         mime_type TEXT NOT NULL,
         processed BOOLEAN DEFAULT FALSE,
+        processing_status TEXT DEFAULT 'pending',
+        processing_error TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
       )
@@ -88,6 +91,7 @@ export const initializeDatabase = async () => {
         chunk_text TEXT NOT NULL,
         chunk_index INTEGER NOT NULL,
         embedding_id TEXT,
+        embedding_vector TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (document_id) REFERENCES documents (id) ON DELETE CASCADE
       )
@@ -169,8 +173,19 @@ export const dbUtils = {
     return await db.getAsync('SELECT * FROM documents WHERE id = ?', [id]);
   },
 
-  async updateDocumentProcessed(id, processed = true) {
-    await db.runAsync('UPDATE documents SET processed = ? WHERE id = ?', [processed, id]);
+  async getDocumentByIdAndUserId(documentId, userId) {
+    return await db.getAsync(
+      'SELECT * FROM documents WHERE id = ? AND user_id = ?',
+      [documentId, userId]
+    );
+  },
+
+  async updateDocumentStatus(id, status, error = null) {
+    const processed = status === 'ready';
+    await db.runAsync(
+      'UPDATE documents SET processed = ?, processing_status = ?, processing_error = ? WHERE id = ?', 
+      [processed, status, error, id]
+    );
   },
 
   async deleteDocument(id) {
@@ -178,10 +193,10 @@ export const dbUtils = {
   },
 
   // Document chunks operations
-  async createDocumentChunk(documentId, chunkText, chunkIndex, embeddingId = null) {
+  async createDocumentChunk(documentId, chunkText, chunkIndex, embeddingId = null, embeddingVector = null) {
     const result = await db.runAsync(
-      'INSERT INTO document_chunks (document_id, chunk_text, chunk_index, embedding_id) VALUES (?, ?, ?, ?)',
-      [documentId, chunkText, chunkIndex, embeddingId]
+      'INSERT INTO document_chunks (document_id, chunk_text, chunk_index, embedding_id, embedding_vector) VALUES (?, ?, ?, ?, ?)',
+      [documentId, chunkText, chunkIndex, embeddingId, embeddingVector]
     );
     return result.lastID;
   },
@@ -203,7 +218,18 @@ export const dbUtils = {
     return await db.allAsync('SELECT * FROM conversations WHERE user_id = ? ORDER BY updated_at DESC', [userId]);
   },
 
-  async updateConversation(id, title) {
+  async getConversationByIdAndUserId(conversationId, userId) {
+    return await db.getAsync(
+      'SELECT * FROM conversations WHERE id = ? AND user_id = ?',
+      [conversationId, userId]
+    );
+  },
+
+  async touchConversation(id) {
+    await db.runAsync('UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', [id]);
+  },
+
+  async updateConversationTitle(id, title) {
     await db.runAsync(
       'UPDATE conversations SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
       [title, id]

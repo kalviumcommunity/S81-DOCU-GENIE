@@ -32,18 +32,31 @@ if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
 console.log('🔍 Environment variables loaded:');
 console.log('📝 PORT:', process.env.PORT);
 console.log('📝 NODE_ENV:', process.env.NODE_ENV);
-console.log('📝 OPENROUTER_API_KEY:', process.env.OPENROUTER_API_KEY ? '✅ Loaded' : '❌ Missing');
-console.log('📝 JWT_SECRET:', process.env.JWT_SECRET ? '✅ Loaded' : '❌ Missing');
+
+const requiredEnvVars = ['JWT_SECRET', 'OPENROUTER_API_KEY', 'GOOGLE_API_KEY', 'SESSION_SECRET'];
+const missing = requiredEnvVars.filter(v => !process.env[v]);
+if (missing.length > 0) {
+  console.error('❌ Missing required environment variables:', missing.join(', '));
+  if (process.env.NODE_ENV === 'production') process.exit(1);
+}
 
 // Note: OpenRouter configuration will be debugged when first used
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+import crypto from 'crypto';
+
+if (!process.env.SESSION_SECRET) {
+  console.error('❌ SESSION_SECRET is not set. Server will not start in production.');
+  if (process.env.NODE_ENV === 'production') process.exit(1);
+}
+const sessionSecret = process.env.SESSION_SECRET || crypto.randomBytes(64).toString('hex');
+
 const app = express();
 // Express session setup (required for passport)
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'your_session_secret',
+  secret: sessionSecret,
   resave: false,
   saveUninitialized: false
 }));
@@ -58,12 +71,10 @@ app.use(helmet());
 app.use(morgan('combined'));
 
 // Rate limiting
-const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.'
-});
-app.use(limiter);
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: 'Too many auth attempts' });
+const uploadLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 20, message: 'Upload limit reached' });
+const chatLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, message: 'Slow down! Too many messages' });
+const generalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200 });
 
 // CORS configuration
 app.use(cors({
@@ -89,11 +100,21 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    version: process.env.npm_package_version || '1.0.0'
+  });
+});
+
 // API routes
-app.use('/api/auth', authRoutes);
+app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api/files/upload', uploadLimiter);
 app.use('/api/files', authenticateToken, fileRoutes);
-app.use('/api/chat', authenticateToken, chatRoutes);
+app.use('/api/chat', authenticateToken, chatLimiter, chatRoutes);
 app.use('/api/user', authenticateToken, userRoutes);
+app.use(generalLimiter); // fallback
 
 // 404 handler
 app.use('*', (req, res) => {

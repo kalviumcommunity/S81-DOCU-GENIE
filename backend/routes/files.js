@@ -115,6 +115,8 @@ router.get('/list', asyncHandler(async (req, res) => {
     size: doc.file_size,
     type: doc.mime_type,
     processed: Boolean(doc.processed),
+    processingStatus: doc.processing_status,
+    processingError: doc.processing_error,
     uploadedAt: doc.created_at
   }));
 
@@ -132,15 +134,10 @@ router.get('/:id', asyncHandler(async (req, res) => {
     throw new AppError('Invalid document ID', 400, 'INVALID_ID');
   }
 
-  const document = await dbUtils.getDocumentById(documentId);
+  const document = await dbUtils.getDocumentByIdAndUserId(documentId, req.user.id);
   
   if (!document) {
-    throw new AppError('Document not found', 404, 'DOCUMENT_NOT_FOUND');
-  }
-
-  // Check if user owns the document
-  if (document.user_id !== req.user.id) {
-    throw new AppError('Access denied', 403, 'ACCESS_DENIED');
+    throw new AppError('Document not found or access denied', 404, 'DOCUMENT_NOT_FOUND');
   }
 
   res.json({
@@ -162,15 +159,10 @@ router.delete('/:id', asyncHandler(async (req, res) => {
     throw new AppError('Invalid document ID', 400, 'INVALID_ID');
   }
 
-  const document = await dbUtils.getDocumentById(documentId);
+  const document = await dbUtils.getDocumentByIdAndUserId(documentId, req.user.id);
   
   if (!document) {
-    throw new AppError('Document not found', 404, 'DOCUMENT_NOT_FOUND');
-  }
-
-  // Check if user owns the document
-  if (document.user_id !== req.user.id) {
-    throw new AppError('Access denied', 403, 'ACCESS_DENIED');
+    throw new AppError('Document not found or access denied', 404, 'DOCUMENT_NOT_FOUND');
   }
 
   try {
@@ -197,15 +189,10 @@ router.get('/:id/download', asyncHandler(async (req, res) => {
     throw new AppError('Invalid document ID', 400, 'INVALID_ID');
   }
 
-  const document = await dbUtils.getDocumentById(documentId);
+  const document = await dbUtils.getDocumentByIdAndUserId(documentId, req.user.id);
   
   if (!document) {
-    throw new AppError('Document not found', 404, 'DOCUMENT_NOT_FOUND');
-  }
-
-  // Check if user owns the document
-  if (document.user_id !== req.user.id) {
-    throw new AppError('Access denied', 403, 'ACCESS_DENIED');
+    throw new AppError('Document not found or access denied', 404, 'DOCUMENT_NOT_FOUND');
   }
 
   try {
@@ -221,6 +208,31 @@ router.get('/:id/download', asyncHandler(async (req, res) => {
   } catch (error) {
     throw new AppError('File not found on server', 404, 'FILE_NOT_FOUND');
   }
+}));
+
+// Reprocess a document
+router.post('/:id/reprocess', asyncHandler(async (req, res) => {
+  const documentId = parseInt(req.params.id);
+  
+  if (isNaN(documentId)) {
+    throw new AppError('Invalid document ID', 400, 'INVALID_ID');
+  }
+
+  const document = await dbUtils.getDocumentByIdAndUserId(documentId, req.user.id);
+  
+  if (!document) {
+    throw new AppError('Document not found', 404, 'DOCUMENT_NOT_FOUND');
+  }
+  
+  // Reset status
+  await dbUtils.updateDocumentStatus(documentId, 'processing');
+  
+  // Process asynchronously
+  processDocument(documentId, document.file_path, document.mime_type)
+    .then(() => console.log(`✅ Document ${documentId} reprocessed successfully`))
+    .catch((err) => console.error(`❌ Failed to reprocess document ${documentId}:`, err));
+  
+  res.json({ message: 'Document processing restarted' });
 }));
 
 export default router;

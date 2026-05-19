@@ -16,6 +16,7 @@ import {
   Trash2,
   Download
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import apiService from '../services/api';
 
 const Chat = () => {
@@ -40,6 +41,7 @@ const Chat = () => {
   const [toastMessage, setToastMessage] = useState('');
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -56,15 +58,17 @@ const Chat = () => {
 
   useEffect(() => {
     // If redirected from Google, set authentication and store JWT token
-    const token = queryParams.get('token');
-    if (userId && token) {
-      // Set all required localStorage items before navigation
-      localStorage.setItem('googleUserId', userId);
-      localStorage.setItem('isAuthenticated', 'true');
-      localStorage.setItem('token', token);
-      setTimeout(() => {
+    const code = queryParams.get('code');
+    if (code) {
+      apiService.exchangeOAuthCode(code).then(data => {
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('user', JSON.stringify(data.user));
+        localStorage.setItem('isAuthenticated', 'true');
         navigate('/chat', { replace: true });
-      }, 100); // Ensure localStorage is set before navigation
+      }).catch(err => {
+        console.error('Failed to exchange code:', err);
+        navigate('/login', { replace: true });
+      });
       return;
     }
 
@@ -109,7 +113,7 @@ const Chat = () => {
   useEffect(() => {
     const interval = setInterval(() => {
       // Only refresh if there are files that are still processing
-      if (files.some(file => !file.processed)) {
+      if (files.some(file => !file.processed && file.processingStatus !== 'failed')) {
         loadFiles();
       }
     }, 5000); // Check every 5 seconds
@@ -234,35 +238,60 @@ const Chat = () => {
     }
   };
 
-  const handleFileUpload = async (e) => {
+  const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (file) {
-      try {
-        setIsLoading(true);
-        const response = await apiService.uploadFile(file);
-        
-        // Add new file to the list
-        const newFile = {
-          id: response.document.id,
-          name: response.document.filename,
-          type: response.document.type,
-          size: `${(response.document.size / (1024 * 1024)).toFixed(1)} MB`,
-          processed: response.document.processed
-        };
-        
-        setFiles(prev => [...prev, newFile]);
-        setActiveFile(newFile);
-        setShowUploadModal(false);
-        showToastNotification(`Successfully uploaded ${file.name}`);
-        
-        // Reload files to get updated processing status
-        setTimeout(() => loadFiles(), 2000);
-      } catch (error) {
-        console.error('Error uploading file:', error);
-        showToastNotification(error?.message || 'Failed to upload file');
-      } finally {
-        setIsLoading(false);
-      }
+      uploadFile(file);
+    }
+  };
+
+  const uploadFile = async (file) => {
+    try {
+      setIsLoading(true);
+      const response = await apiService.uploadFile(file);
+      
+      // Add new file to the list
+      const newFile = {
+        id: response.document.id,
+        name: response.document.filename,
+        type: response.document.type,
+        size: `${(response.document.size / (1024 * 1024)).toFixed(1)} MB`,
+        processed: response.document.processed,
+        processingStatus: 'processing'
+      };
+      
+      setFiles(prev => [...prev, newFile]);
+      setActiveFile(newFile);
+      setShowUploadModal(false);
+      showToastNotification(`Successfully uploaded ${file.name}`);
+      
+      // Reload files to get updated processing status
+      setTimeout(() => loadFiles(), 2000);
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      showToastNotification(error?.message || 'Failed to upload file');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+    
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      uploadFile(file);
     }
   };
 
@@ -307,8 +336,34 @@ const Chat = () => {
     }
   };
 
+  const handleReprocess = async (fileId) => {
+    try {
+      await apiService.reprocessDocument(fileId);
+      showToastNotification('Document reprocessing started');
+      loadFiles();
+    } catch (error) {
+      console.error('Error reprocessing document:', error);
+      showToastNotification('Failed to reprocess document');
+    }
+  };
+
   return (
-    <div className="flex h-screen bg-black text-white">
+    <div 
+      className="flex h-screen bg-black text-white relative"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {/* Drag & Drop Overlay */}
+      {isDragging && (
+        <div className="absolute inset-0 z-50 bg-green-500/20 border-4 border-green-500 border-dashed rounded-lg flex items-center justify-center pointer-events-none">
+          <div className="bg-gray-900 p-6 rounded-2xl shadow-xl flex flex-col items-center">
+            <Upload className="w-16 h-16 text-green-400 mb-4" />
+            <p className="text-2xl font-bold text-white">Drop file to upload</p>
+          </div>
+        </div>
+      )}
+
       {/* Toast Notification */}
       {showToast && (
         <div className="fixed top-4 right-4 z-50 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg transform transition-all duration-300 ease-in-out">
@@ -420,14 +475,24 @@ const Chat = () => {
                         <p className="text-sm font-medium truncate">{file.name}</p>
                         <p className="text-xs text-gray-500">{file.size}</p>
                         <div className="flex items-center space-x-2 mt-1">
-                          <span className={`text-xs px-2 py-1 rounded-full ${
-                            file.processed 
-                              ? 'bg-green-500/20 text-green-400' 
-                              : 'bg-yellow-500/20 text-yellow-400'
-                          }`}>
-                            {file.processed ? 'Ready' : 'Processing...'}
+                          <span 
+                            className={`text-xs px-2 py-1 rounded-full ${
+                              file.processed 
+                                ? 'bg-green-500/20 text-green-400' 
+                                : file.processingStatus === 'failed'
+                                  ? 'bg-red-500/20 text-red-400 cursor-pointer hover:bg-red-500/30'
+                                  : 'bg-yellow-500/20 text-yellow-400'
+                            }`}
+                            onClick={(e) => {
+                              if (file.processingStatus === 'failed') {
+                                e.stopPropagation();
+                                handleReprocess(file.id);
+                              }
+                            }}
+                          >
+                            {file.processed ? 'Ready' : (file.processingStatus === 'failed' ? 'Failed - Click to retry' : 'Processing...')}
                           </span>
-                          {!file.processed && (
+                          {!file.processed && file.processingStatus !== 'failed' && (
                             <div className="w-3 h-3">
                               <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-yellow-400"></div>
                             </div>
@@ -521,7 +586,13 @@ const Chat = () => {
                       : 'bg-gray-800 text-white border border-gray-700'
                   }`}
                 >
-                  <p className="leading-relaxed whitespace-pre-wrap">{message.content}</p>
+                  {message.sender === 'user' ? (
+                    <p className="leading-relaxed whitespace-pre-wrap">{message.content}</p>
+                  ) : (
+                    <div className="leading-relaxed whitespace-pre-wrap prose prose-invert max-w-none">
+                      <ReactMarkdown>{message.content}</ReactMarkdown>
+                    </div>
+                  )}
                   <p className="text-xs mt-2 opacity-70">
                     {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </p>

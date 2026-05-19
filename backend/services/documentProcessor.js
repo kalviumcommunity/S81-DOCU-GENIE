@@ -6,7 +6,7 @@ import Tesseract from 'tesseract.js';
 import { fromPath } from 'pdf2pic';
 import path from 'path';
 import { dbUtils } from '../config/database.js';
-import { createEmbeddings, storeInVectorDB } from './vectorService.js';
+import { createEmbeddings } from './vectorService.js';
 
 // Main document processing function
 export const processDocument = async (documentId, filePath, mimeType) => {
@@ -46,11 +46,8 @@ export const processDocument = async (documentId, filePath, mimeType) => {
         // Create embedding for the chunk
         const embedding = await createEmbeddings(chunk);
         
-        // Store in vector database
-        const embeddingId = await storeInVectorDB(documentId, chunk, embedding, i);
-        
-        // Store chunk in database
-        await dbUtils.createDocumentChunk(documentId, chunk, i, embeddingId);
+        // Store chunk in database with embedding
+        await dbUtils.createDocumentChunk(documentId, chunk, i, null, JSON.stringify(embedding));
         
         console.log(`✅ Chunk ${i + 1}/${chunks.length} processed successfully`);
       } catch (chunkError) {
@@ -60,7 +57,7 @@ export const processDocument = async (documentId, filePath, mimeType) => {
     }
 
     // Mark document as processed
-    await dbUtils.updateDocumentProcessed(documentId, true);
+    await dbUtils.updateDocumentStatus(documentId, 'ready');
 
     console.log(`✅ Document ${documentId} processed successfully`);
     return { 
@@ -74,7 +71,7 @@ export const processDocument = async (documentId, filePath, mimeType) => {
     console.error(`❌ Error processing document ${documentId}:`, error);
     
     // Mark document as failed
-    await dbUtils.updateDocumentProcessed(documentId, false);
+    await dbUtils.updateDocumentStatus(documentId, 'failed', error.message);
     
     throw error;
   }
@@ -134,6 +131,7 @@ const extractPDFText = async (filePath) => {
 
 // Extract text from image-based PDFs using OCR
 const extractTextWithOCR = async (filePath) => {
+  let pageCount = [];
   try {
     console.log('🔄 Starting OCR processing for image-based PDF...');
     
@@ -148,7 +146,7 @@ const extractTextWithOCR = async (filePath) => {
     };
     
     const convert = fromPath(filePath, options);
-    const pageCount = await convert.bulk(-1); // Convert all pages
+    pageCount = await convert.bulk(-1); // Convert all pages
     
     console.log(`📄 Converting ${pageCount.length} PDF pages to images for OCR...`);
     
@@ -200,15 +198,6 @@ const extractTextWithOCR = async (filePath) => {
       }
     }
     
-    // Clean up remaining temporary files
-    for (let i = maxPages; i < pageCount.length; i++) {
-      try {
-        await fs.unlink(pageCount[i].path);
-      } catch (cleanupError) {
-        console.warn(`⚠️ Failed to cleanup page ${i + 1}:`, cleanupError);
-      }
-    }
-    
     if (!extractedText.trim()) {
       throw new Error('OCR processing failed to extract any text from the PDF');
     }
@@ -220,6 +209,17 @@ const extractTextWithOCR = async (filePath) => {
   } catch (error) {
     console.error('❌ OCR processing failed:', error);
     throw new Error(`OCR text extraction failed: ${error.message}`);
+  } finally {
+    // Clean up all temporary files
+    if (pageCount && pageCount.length > 0) {
+      for (const page of pageCount) {
+        try {
+          await fs.unlink(page.path);
+        } catch (e) {
+          // Ignore if already deleted
+        }
+      }
+    }
   }
 };
 

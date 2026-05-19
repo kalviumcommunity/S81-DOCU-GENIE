@@ -1,39 +1,8 @@
-import { ChromaClient } from 'chromadb';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { dbUtils } from '../config/database.js';
 
 // Initialize Google AI
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
-
-// Initialize ChromaDB client
-let chromaClient;
-let collection;
-
-const initializeChromaDB = async () => {
-  try {
-    chromaClient = new ChromaClient();
-    
-    // Create or get collection for document embeddings
-    collection = await chromaClient.getOrCreateCollection({
-      name: 'document_embeddings',
-      metadata: { description: 'Document chunks with embeddings for Q&A' }
-    });
-    
-    console.log('✅ ChromaDB initialized successfully');
-    return collection;
-  } catch (error) {
-    console.warn('⚠️ ChromaDB not available - using fallback storage:', error.message);
-    // Don't throw error, just log warning and continue without ChromaDB
-    return null;
-  }
-};
-
-// Ensure ChromaDB is initialized
-const getCollection = async () => {
-  if (!collection) {
-    await initializeChromaDB();
-  }
-  return collection;
-};
 
 // Create embeddings using Google AI
 export const createEmbeddings = async (text) => {
@@ -79,98 +48,51 @@ const simpleHash = (str) => {
   return hash;
 };
 
-// Store embedding in ChromaDB
-export const storeInVectorDB = async (documentId, text, embedding, chunkIndex) => {
-  try {
-    const coll = await getCollection();
-    
-    if (!coll) {
-      console.warn('ChromaDB not available, skipping vector storage');
-      return `fallback_doc_${documentId}_chunk_${chunkIndex}`;
-    }
-    
-    const embeddingId = `doc_${documentId}_chunk_${chunkIndex}`;
-    
-    await coll.add({
-      ids: [embeddingId],
-      embeddings: [embedding],
-      documents: [text],
-      metadatas: [{
-        document_id: documentId,
-        chunk_index: chunkIndex,
-        timestamp: new Date().toISOString()
-      }]
-    });
-    
-    return embeddingId;
-  } catch (error) {
-    console.warn('Error storing in vector DB, using fallback:', error.message);
-    return `fallback_doc_${documentId}_chunk_${chunkIndex}`;
-  }
+// Cosine similarity
+const cosineSimilarity = (a, b) => {
+  const dot = a.reduce((sum, ai, i) => sum + ai * b[i], 0);
+  const magA = Math.sqrt(a.reduce((sum, ai) => sum + ai * ai, 0));
+  const magB = Math.sqrt(b.reduce((sum, bi) => sum + bi * bi, 0));
+  return magA && magB ? dot / (magA * magB) : 0;
 };
 
 // Search for similar text chunks
 export const searchSimilarChunks = async (query, documentId = null, topK = 5) => {
   try {
-    const coll = await getCollection();
-    
-    if (!coll) {
-      console.warn('ChromaDB not available, using fallback search');
-      // Fallback: return chunks from database without similarity search
-      const { dbUtils } = await import('../config/database.js');
-      const chunks = documentId 
-        ? await dbUtils.getDocumentChunks(documentId)
-        : [];
-      
-      return chunks.slice(0, topK).map((chunk, index) => ({
-        text: chunk.chunk_text,
-        metadata: { document_id: documentId, chunk_index: chunk.chunk_index },
-        similarity: 0.8 - (index * 0.1), // Mock similarity scores
-        documentId: documentId,
-        chunkIndex: chunk.chunk_index
-      }));
-    }
-    
-    // Create embedding for the query
     const queryEmbedding = await createEmbeddings(query);
     
-    // Prepare where clause for filtering by document if specified
-    const whereClause = documentId ? { document_id: documentId } : undefined;
-    
-    // Search for similar chunks
-    const results = await coll.query({
-      queryEmbeddings: [queryEmbedding],
-      nResults: topK,
-      where: whereClause,
-      include: ['documents', 'metadatas', 'distances']
-    });
-    
-    // Format results
-    const formattedResults = [];
-    if (results.documents && results.documents[0]) {
-      for (let i = 0; i < results.documents[0].length; i++) {
-        formattedResults.push({
-          text: results.documents[0][i],
-          metadata: results.metadatas[0][i],
-          similarity: 1 - (results.distances[0][i] || 0), // Convert distance to similarity
-          documentId: results.metadatas[0][i].document_id,
-          chunkIndex: results.metadatas[0][i].chunk_index
-        });
-      }
-    }
-    
-    return formattedResults;
+    const chunks = documentId 
+      ? await dbUtils.getDocumentChunks(documentId)
+      : await dbUtils.db.allAsync('SELECT * FROM document_chunks');
+      
+    const scored = chunks
+      .filter(c => c.embedding_vector)
+      .map(c => {
+        let vec;
+        try { vec = JSON.parse(c.embedding_vector); } catch(e) { return null; }
+        return {
+          ...c,
+          similarity: cosineSimilarity(queryEmbedding, vec)
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, topK);
+
+    return scored.map(c => ({
+      text: c.chunk_text,
+      similarity: c.similarity,
+      documentId: c.document_id,
+      chunkIndex: c.chunk_index
+    }));
   } catch (error) {
     console.warn('Error searching similar chunks, using fallback:', error.message);
-    // Fallback to database search
-    const { dbUtils } = await import('../config/database.js');
     const chunks = documentId 
       ? await dbUtils.getDocumentChunks(documentId)
       : [];
     
     return chunks.slice(0, topK).map((chunk, index) => ({
       text: chunk.chunk_text,
-      metadata: { document_id: documentId, chunk_index: chunk.chunk_index },
       similarity: 0.7 - (index * 0.1),
       documentId: documentId,
       chunkIndex: chunk.chunk_index
@@ -181,26 +103,11 @@ export const searchSimilarChunks = async (query, documentId = null, topK = 5) =>
 // Get all chunks for a specific document
 export const getDocumentChunks = async (documentId) => {
   try {
-    const coll = await getCollection();
-    
-    const results = await coll.get({
-      where: { document_id: documentId },
-      include: ['documents', 'metadatas']
-    });
-    
-    const chunks = [];
-    if (results.documents) {
-      for (let i = 0; i < results.documents.length; i++) {
-        chunks.push({
-          text: results.documents[i],
-          metadata: results.metadatas[i],
-          chunkIndex: results.metadatas[i].chunk_index
-        });
-      }
-    }
-    
-    // Sort by chunk index
-    return chunks.sort((a, b) => a.chunkIndex - b.chunkIndex);
+    const chunks = await dbUtils.getDocumentChunks(documentId);
+    return chunks.map(c => ({
+      text: c.chunk_text,
+      chunkIndex: c.chunk_index
+    })).sort((a, b) => a.chunkIndex - b.chunkIndex);
   } catch (error) {
     console.error('Error getting document chunks:', error);
     throw error;
@@ -209,46 +116,14 @@ export const getDocumentChunks = async (documentId) => {
 
 // Delete document embeddings from vector DB
 export const deleteDocumentEmbeddings = async (documentId) => {
-  try {
-    const coll = await getCollection();
-    
-    // Get all embeddings for this document
-    const results = await coll.get({
-      where: { document_id: documentId },
-      include: ['ids']
-    });
-    
-    if (results.ids && results.ids.length > 0) {
-      await coll.delete({
-        ids: results.ids
-      });
-      console.log(`✅ Deleted ${results.ids.length} embeddings for document ${documentId}`);
-    }
-  } catch (error) {
-    console.error('Error deleting document embeddings:', error);
-    throw error;
-  }
+  // SQLite handles this via CASCADE on the foreign key, so we do nothing here.
+  return;
 };
 
 // Health check for vector service
 export const vectorServiceHealthCheck = async () => {
-  try {
-    const coll = await getCollection();
-    const count = await coll.count();
-    
-    return {
-      status: 'healthy',
-      totalEmbeddings: count,
-      timestamp: new Date().toISOString()
-    };
-  } catch (error) {
-    return {
-      status: 'unhealthy',
-      error: error.message,
-      timestamp: new Date().toISOString()
-    };
-  }
+  return {
+    status: 'healthy',
+    timestamp: new Date().toISOString()
+  };
 };
-
-// Initialize the service when module is imported
-initializeChromaDB().catch(console.error);

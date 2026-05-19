@@ -1,5 +1,5 @@
 const API_BASE_URL =
-  window.location.hostname === 'localhost'
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
     ? 'http://localhost:3001/api'
     : 'https://s81-docu-genie.onrender.com/api';
 
@@ -56,6 +56,11 @@ class ApiService {
     return data;
   }
 
+  async exchangeOAuthCode(code) {
+    const response = await fetch(`${API_BASE_URL}/auth/exchange?code=${code}`);
+    return handleResponse(response);
+  }
+
   async logout() {
     localStorage.removeItem('token');
     localStorage.removeItem('isAuthenticated');
@@ -91,6 +96,17 @@ class ApiService {
   async deleteFile(fileId) {
     const response = await fetch(`${API_BASE_URL}/files/${fileId}`, {
       method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${getAuthToken()}`,
+      },
+    });
+
+    return handleResponse(response);
+  }
+
+  async reprocessDocument(fileId) {
+    const response = await fetch(`${API_BASE_URL}/files/${fileId}/reprocess`, {
+      method: 'POST',
       headers: {
         'Authorization': `Bearer ${getAuthToken()}`,
       },
