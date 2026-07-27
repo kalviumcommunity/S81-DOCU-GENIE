@@ -14,10 +14,15 @@ import {
   X,
   Menu,
   Trash2,
-  Download
+  Download,
+  Settings,
+  KeyRound,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import apiService from '../services/api';
+import { isAuthenticated } from '../utils/auth';
 
 const Chat = () => {
   const location = useLocation();
@@ -42,9 +47,16 @@ const Chat = () => {
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [notifiedFileIds, setNotifiedFileIds] = useState(() => new Set());
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [hasApiKey, setHasApiKey] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [apiKeySaving, setApiKeySaving] = useState(false);
   
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
+  const oauthCodeHandledRef = useRef(false);
   const navigate = useNavigate();
   const { documentId } = useParams();
 
@@ -60,6 +72,13 @@ const Chat = () => {
     // If redirected from Google, set authentication and store JWT token
     const code = queryParams.get('code');
     if (code) {
+      // React StrictMode double-invokes effects in dev, and the backend's
+      // OAuth code is single-use - without this guard the second call would
+      // get "invalid code" and bounce us back to /login right after login.
+      if (oauthCodeHandledRef.current) {
+        return;
+      }
+      oauthCodeHandledRef.current = true;
       apiService.exchangeOAuthCode(code).then(data => {
         localStorage.setItem('token', data.token);
         localStorage.setItem('user', JSON.stringify(data.user));
@@ -72,19 +91,55 @@ const Chat = () => {
       return;
     }
 
-    // Robust authentication check
-    const isAuth = localStorage.getItem('isAuthenticated');
-    const googleId = localStorage.getItem('googleUserId');
-    const jwtToken = localStorage.getItem('token');
-    if ((!isAuth && !googleId) || !jwtToken) {
-      // Show loading spinner briefly before redirecting to login
-      setTimeout(() => {
-        navigate('/login');
-      }, 100);
+    if (!isAuthenticated()) {
+      navigate('/login', { replace: true });
     } else {
       loadFiles();
+      loadProfile();
     }
   }, [navigate, userId]);
+
+  const loadProfile = async () => {
+    try {
+      const response = await apiService.getProfile();
+      setHasApiKey(Boolean(response.user?.hasApiKey));
+    } catch (error) {
+      console.error('Error loading profile:', error);
+    }
+  };
+
+  const handleSaveApiKey = async (e) => {
+    e.preventDefault();
+    if (!apiKeyInput.trim()) return;
+
+    try {
+      setApiKeySaving(true);
+      await apiService.updateApiKey(apiKeyInput.trim());
+      setHasApiKey(true);
+      setApiKeyInput('');
+      showToastNotification('API key saved successfully');
+      setShowSettingsModal(false);
+    } catch (error) {
+      console.error('Error saving API key:', error);
+      showToastNotification(error?.message || 'Failed to save API key');
+    } finally {
+      setApiKeySaving(false);
+    }
+  };
+
+  const handleRemoveApiKey = async () => {
+    try {
+      setApiKeySaving(true);
+      await apiService.deleteApiKey();
+      setHasApiKey(false);
+      showToastNotification('API key removed');
+    } catch (error) {
+      console.error('Error removing API key:', error);
+      showToastNotification(error?.message || 'Failed to remove API key');
+    } finally {
+      setApiKeySaving(false);
+    }
+  };
 
   const loadFiles = async () => {
     try {
@@ -121,15 +176,22 @@ const Chat = () => {
     return () => clearInterval(interval);
   }, [files]);
 
-  // Check for newly processed files and show notification
+  // Check for newly processed files and show notification. Notified IDs are
+  // tracked separately (not on the file objects themselves) since loadFiles()
+  // replaces `files` with fresh objects from the server on every poll.
   useEffect(() => {
-    files.forEach(file => {
-      if (file.processed && !file._notified) {
-        showToastNotification(`${file.name} is now ready for questions!`);
-        // Mark as notified to avoid duplicate notifications
-        file._notified = true;
-      }
+    const newlyReady = files.filter(file => file.processed && !notifiedFileIds.has(file.id));
+    if (newlyReady.length === 0) return;
+
+    newlyReady.forEach(file => {
+      showToastNotification(`${file.name} is now ready for questions!`);
     });
+    setNotifiedFileIds(prev => {
+      const next = new Set(prev);
+      newlyReady.forEach(file => next.add(file.id));
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [files]);
 
   // Manual refresh function
@@ -406,6 +468,92 @@ const Chat = () => {
         </div>
       )}
 
+      {/* Settings Modal */}
+      {showSettingsModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-40">
+          <div className="bg-gray-800 rounded-2xl p-8 max-w-md w-full mx-4 border border-gray-700">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-semibold text-white flex items-center space-x-2">
+                <KeyRound className="w-5 h-5 text-green-400" />
+                <span>OpenRouter API Key</span>
+              </h3>
+              <button
+                onClick={() => setShowSettingsModal(false)}
+                className="text-gray-400 hover:text-white transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <p className="text-sm text-gray-400 mb-4">
+              Connect your own OpenRouter API key to chat with Docu Genie using your own quota.
+              Get a free key at{' '}
+              <a
+                href="https://openrouter.ai/keys"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-green-400 hover:underline"
+              >
+                openrouter.ai/keys
+              </a>.
+            </p>
+
+            <div className="mb-4">
+              <span
+                className={`text-xs px-2 py-1 rounded-full ${
+                  hasApiKey ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
+                }`}
+              >
+                {hasApiKey ? 'Your key is connected' : 'Using shared/default key'}
+              </span>
+            </div>
+
+            <form onSubmit={handleSaveApiKey} className="space-y-3">
+              <div className="relative">
+                <input
+                  type={showApiKey ? 'text' : 'password'}
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  placeholder="sk-or-v1-..."
+                  className="w-full px-4 py-3 pr-10 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all duration-200"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowApiKey(!showApiKey)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+                >
+                  {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+
+              <div className="flex space-x-3">
+                <button
+                  type="submit"
+                  disabled={!apiKeyInput.trim() || apiKeySaving}
+                  className="flex-1 bg-gradient-to-r from-green-500 to-blue-500 hover:from-green-400 hover:to-blue-400 disabled:from-gray-600 disabled:to-gray-600 disabled:cursor-not-allowed text-white py-2 rounded-lg font-medium transition-all duration-200"
+                >
+                  {apiKeySaving ? 'Saving...' : 'Save Key'}
+                </button>
+                {hasApiKey && (
+                  <button
+                    type="button"
+                    onClick={handleRemoveApiKey}
+                    disabled={apiKeySaving}
+                    className="px-4 py-2 bg-gray-700 hover:bg-red-500/80 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            </form>
+
+            <p className="text-xs text-gray-500 mt-4">
+              Your key is stored securely on the server and only used to make requests on your behalf.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Left Sidebar */}
       <div className={`${sidebarOpen ? 'w-80' : 'w-0'} transition-all duration-300 bg-gray-900 border-r border-gray-700 flex flex-col overflow-hidden lg:relative absolute z-30 h-full`}>
         <div className="p-6 border-b border-gray-700">
@@ -516,7 +664,20 @@ const Chat = () => {
           )}
         </div>
 
-        <div className="p-4 border-t border-gray-700">
+        <div className="p-4 border-t border-gray-700 space-y-1">
+          <button
+            onClick={() => setShowSettingsModal(true)}
+            className="w-full flex items-center justify-between text-gray-400 hover:text-white transition-colors py-2"
+          >
+            <span className="flex items-center space-x-2">
+              <Settings className="w-5 h-5" />
+              <span>API Key</span>
+            </span>
+            <span
+              className={`w-2 h-2 rounded-full ${hasApiKey ? 'bg-green-400' : 'bg-yellow-400'}`}
+              title={hasApiKey ? 'Your key is connected' : 'Using shared/default key'}
+            />
+          </button>
           <button
             onClick={handleLogout}
             className="w-full flex items-center space-x-2 text-gray-400 hover:text-red-400 transition-colors py-2"

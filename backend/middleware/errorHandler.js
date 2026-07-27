@@ -14,7 +14,11 @@ export const errorHandler = (err, req, res, next) => {
   let code = 'INTERNAL_ERROR';
 
   // Handle specific error types
-  if (err.name === 'ValidationError') {
+  if (err instanceof AppError) {
+    statusCode = err.statusCode;
+    message = err.message;
+    code = err.code;
+  } else if (err.name === 'ValidationError') {
     statusCode = 400;
     message = 'Validation error';
     code = 'VALIDATION_ERROR';

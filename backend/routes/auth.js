@@ -10,6 +10,25 @@ import { asyncHandler, AppError } from '../middleware/errorHandler.js';
 const router = express.Router();
 const oauthCodes = new Map(); // In-memory store (or Redis in prod)
 
+// Periodically sweep expired, unclaimed OAuth codes so abandoned OAuth
+// attempts (closed tab, network failure) don't leak memory forever.
+const OAUTH_CODE_SWEEP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [code, entry] of oauthCodes) {
+    if (now > entry.expiresAt) {
+      oauthCodes.delete(code);
+    }
+  }
+}, OAUTH_CODE_SWEEP_INTERVAL_MS).unref();
+
+const defaultFrontendUrl = process.env.NODE_ENV === 'production'
+  ? 'https://docugenie-ai.netlify.app'
+  : 'http://localhost:5173';
+const frontendUrl = process.env.FRONTEND_URL
+  ? process.env.FRONTEND_URL.split(',')[0].trim()
+  : defaultFrontendUrl;
+
 // Google OAuth routes
 router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 
@@ -18,11 +37,7 @@ router.get('/google/callback',
   (req, res) => {
     const code = crypto.randomBytes(32).toString('hex');
     oauthCodes.set(code, { userId: req.user.id, expiresAt: Date.now() + 60000 }); // 60s TTL
-    
-    const frontendUrl = process.env.NODE_ENV === 'production' 
-      ? 'https://docugenie-ai.netlify.app'
-      : 'http://localhost:5173'; // Make sure your local frontend is on 5173 or 5174
-      
+
     res.redirect(`${frontendUrl}/chat?code=${code}`);
   }
 );
@@ -76,9 +91,10 @@ const validateLogin = [
 
 // Register new user
 router.post('/register', validateRegistration, asyncHandler(async (req, res) => {
-  // Log the incoming request for debugging
-  console.log('🔍 Registration request received for email:', req.body.email);
-  
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('🔍 Registration request received for email:', req.body.email);
+  }
+
   // Check validation errors
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -122,9 +138,10 @@ router.post('/register', validateRegistration, asyncHandler(async (req, res) => 
 
 // Login user
 router.post('/login', validateLogin, asyncHandler(async (req, res) => {
-  // Log the incoming request for debugging
-  console.log('🔍 Login request received for email:', req.body.email);
-  
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('🔍 Login request received for email:', req.body.email);
+  }
+
   // Check validation errors
   const errors = validationResult(req);
   if (!errors.isEmpty()) {

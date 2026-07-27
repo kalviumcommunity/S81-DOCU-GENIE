@@ -38,31 +38,48 @@ export const processDocument = async (documentId, filePath, mimeType) => {
     const chunks = splitTextIntoChunks(extractedText);
     console.log(`📄 Document split into ${chunks.length} chunks`);
 
-    // Process each chunk
+    // Process each chunk, retrying once per chunk on failure
+    let chunksStored = 0;
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
-      
-      try {
-        // Create embedding for the chunk
-        const embedding = await createEmbeddings(chunk);
-        
-        // Store chunk in database with embedding
-        await dbUtils.createDocumentChunk(documentId, chunk, i, null, JSON.stringify(embedding));
-        
-        console.log(`✅ Chunk ${i + 1}/${chunks.length} processed successfully`);
-      } catch (chunkError) {
-        console.error(`❌ Error processing chunk ${i + 1}:`, chunkError);
-        // Continue with other chunks
+      let stored = false;
+
+      for (let attempt = 1; attempt <= 2 && !stored; attempt++) {
+        try {
+          // Create embedding for the chunk
+          const embedding = await createEmbeddings(chunk);
+
+          // Store chunk in database with embedding
+          await dbUtils.createDocumentChunk(documentId, chunk, i, null, JSON.stringify(embedding));
+
+          stored = true;
+          chunksStored++;
+          console.log(`✅ Chunk ${i + 1}/${chunks.length} processed successfully`);
+        } catch (chunkError) {
+          console.error(`❌ Error processing chunk ${i + 1} (attempt ${attempt}):`, chunkError);
+          // Retry once, then give up on this chunk
+        }
       }
+    }
+
+    if (chunksStored === 0 && chunks.length > 0) {
+      const failureMessage = `Failed to store any of ${chunks.length} chunks`;
+      await dbUtils.updateDocumentStatus(documentId, 'failed', failureMessage);
+      throw new Error(failureMessage);
+    }
+
+    if (chunksStored < chunks.length) {
+      console.warn(`⚠️ Document ${documentId}: only ${chunksStored}/${chunks.length} chunks are searchable`);
     }
 
     // Mark document as processed
     await dbUtils.updateDocumentStatus(documentId, 'ready');
 
     console.log(`✅ Document ${documentId} processed successfully`);
-    return { 
-      success: true, 
-      chunksCreated: chunks.length,
+    return {
+      success: true,
+      chunksCreated: chunksStored,
+      chunksAttempted: chunks.length,
       documentInfo,
       textLength: extractedText.length
     };

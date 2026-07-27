@@ -4,15 +4,18 @@ import Landing from './components/Landing.jsx';
 import Login from './components/Login.jsx';
 import Signup from './components/Signup.jsx';
 import Chat from './components/Chat.jsx';
+import { isAuthenticated } from './utils/auth.js';
 
 const ProtectedRoute = ({ children }) => {
-  const isAuthenticated = localStorage.getItem('isAuthenticated') === 'true';
-  const token = localStorage.getItem('token');
-  
-  if (!isAuthenticated || !token) {
+  // Allow the OAuth callback through even before the token exists in
+  // localStorage - Chat.jsx exchanges ?code= for a token on mount and
+  // only then is isAuthenticated() true.
+  const hasOAuthCode = new URLSearchParams(window.location.search).has('code');
+
+  if (!isAuthenticated() && !hasOAuthCode) {
     return <Navigate to="/login" replace />;
   }
-  
+
   return children;
 };
 

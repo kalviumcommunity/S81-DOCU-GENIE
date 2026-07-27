@@ -77,12 +77,18 @@ const chatLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, message: 'Slow dow
 const generalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200 });
 
 // CORS configuration
+// FRONTEND_URL can hold a comma-separated list of allowed origins for
+// multi-environment deploys (e.g. a Netlify preview URL alongside prod).
+const envOrigins = (process.env.FRONTEND_URL || '')
+  .split(',')
+  .map(url => url.trim())
+  .filter(Boolean);
+const allowedOrigins = envOrigins.length > 0
+  ? envOrigins
+  : ['http://localhost:5173', 'https://docugenie-ai.netlify.app'];
+
 app.use(cors({
   origin: (origin, callback) => {
-    const allowedOrigins = [
-      'http://localhost:5173',
-      'https://docugenie-ai.netlify.app'
-    ];
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -108,13 +114,18 @@ app.get('/health', (req, res) => {
   });
 });
 
+// General rate limit applies to all /api/* traffic; specific limiters below
+// (auth/upload/chat) layer stricter limits on top of it. This must be
+// mounted before the route handlers, since Express middleware registered
+// after a route that already sent a response never runs for that request.
+app.use('/api', generalLimiter);
+
 // API routes
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/files/upload', uploadLimiter);
 app.use('/api/files', authenticateToken, fileRoutes);
 app.use('/api/chat', authenticateToken, chatLimiter, chatRoutes);
 app.use('/api/user', authenticateToken, userRoutes);
-app.use(generalLimiter); // fallback
 
 // 404 handler
 app.use('*', (req, res) => {

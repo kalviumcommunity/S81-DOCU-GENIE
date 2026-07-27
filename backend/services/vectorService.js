@@ -50,6 +50,11 @@ const simpleHash = (str) => {
 
 // Cosine similarity
 const cosineSimilarity = (a, b) => {
+  // Vectors from different embedding sources (real Gemini vs. fallback hash)
+  // have different dimensions and are not comparable.
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+    return 0;
+  }
   const dot = a.reduce((sum, ai, i) => sum + ai * b[i], 0);
   const magA = Math.sqrt(a.reduce((sum, ai) => sum + ai * ai, 0));
   const magB = Math.sqrt(b.reduce((sum, bi) => sum + bi * bi, 0));
@@ -83,19 +88,25 @@ export const searchSimilarChunks = async (query, documentId = null, topK = 5) =>
       text: c.chunk_text,
       similarity: c.similarity,
       documentId: c.document_id,
-      chunkIndex: c.chunk_index
+      chunkIndex: c.chunk_index,
+      degraded: false
     }));
   } catch (error) {
     console.warn('Error searching similar chunks, using fallback:', error.message);
-    const chunks = documentId 
+    const chunks = documentId
       ? await dbUtils.getDocumentChunks(documentId)
       : [];
-    
-    return chunks.slice(0, topK).map((chunk, index) => ({
+
+    // Similarity search itself failed (e.g. DB error), so we can't rank by
+    // relevance at all here. Return chunks in stored order with no fabricated
+    // confidence score, and flag the result as degraded so callers/UI can
+    // avoid presenting these as real similarity scores.
+    return chunks.slice(0, topK).map((chunk) => ({
       text: chunk.chunk_text,
-      similarity: 0.7 - (index * 0.1),
+      similarity: null,
       documentId: documentId,
-      chunkIndex: chunk.chunk_index
+      chunkIndex: chunk.chunk_index,
+      degraded: true
     }));
   }
 };

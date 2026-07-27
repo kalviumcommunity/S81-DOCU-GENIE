@@ -13,19 +13,20 @@ const getModel = () => {
   return MODEL_ID;
 };
 
-// Get API key dynamically (to handle timing issues)
-const getApiKey = () => {
-  const apiKey = process.env.OPENROUTER_API_KEY;
+// Get API key dynamically (to handle timing issues). A user-supplied key
+// (entered in Settings) always takes priority over the server's shared key.
+const getApiKey = (userApiKey) => {
+  const apiKey = userApiKey || process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
-    console.error('❌ OPENROUTER_API_KEY is missing from environment variables');
+    console.error('❌ No OpenRouter API key available - set one in Settings or OPENROUTER_API_KEY');
     throw new Error('OpenRouter API key not configured');
   }
   return apiKey;
 };
 
 // Initialize OpenRouter client dynamically
-const createOpenRouterClient = () => {
-  const apiKey = getApiKey();
+const createOpenRouterClient = (userApiKey) => {
+  const apiKey = getApiKey(userApiKey);
   return axios.create({
     baseURL: OPENROUTER_API_URL,
     headers: {
@@ -46,7 +47,7 @@ const debugConfig = () => {
 };
 
 // Generate AI response using OpenRouter
-export const generateDocumentResponse = async (query, documentId, conversationHistory = []) => {
+export const generateDocumentResponse = async (query, documentId, conversationHistory = [], userApiKey = null) => {
   try {
     // Search for relevant chunks in the document
     let relevantChunks = [];
@@ -108,7 +109,7 @@ Answer:`;
     const model = getModel();
     console.log(`🤖 Calling OpenRouter API with model: ${model}`);
     
-    const openRouterClient = createOpenRouterClient();
+    const openRouterClient = createOpenRouterClient(userApiKey);
     const response = await openRouterClient.post('/chat/completions', {
       model: model,
       messages: [
@@ -129,9 +130,13 @@ Answer:`;
     console.log('✅ OpenRouter API response received');
     const aiResponse = response.data.choices[0].message.content;
 
-    // Calculate confidence based on relevance scores
-    const avgConfidence = relevantChunks.length > 0 
-      ? relevantChunks.reduce((sum, chunk) => sum + chunk.similarity, 0) / relevantChunks.length
+    // Calculate confidence based on relevance scores. Degraded chunks (search
+    // fell back to stored order with no real similarity) don't contribute a
+    // numeric score and are excluded from the average.
+    const isDegraded = relevantChunks.some(chunk => chunk.degraded);
+    const scoredChunks = relevantChunks.filter(chunk => typeof chunk.similarity === 'number');
+    const avgConfidence = scoredChunks.length > 0
+      ? scoredChunks.reduce((sum, chunk) => sum + chunk.similarity, 0) / scoredChunks.length
       : 0;
 
     return {
@@ -141,7 +146,8 @@ Answer:`;
         chunkIndex: chunk.chunkIndex,
         similarity: chunk.similarity
       })),
-      confidence: Math.round(avgConfidence * 100),
+      confidence: isDegraded ? null : Math.round(avgConfidence * 100),
+      degraded: isDegraded,
       documentName,
       model: model
     };
@@ -156,7 +162,9 @@ Answer:`;
     
     // Return fallback response
     return {
-      response: "I'm sorry, I encountered an error while processing your question. Please try again or rephrase your question.",
+      response: error.message === 'OpenRouter API key not configured'
+        ? "No AI API key is configured. Please add your OpenRouter API key in Settings to start chatting."
+        : "I'm sorry, I encountered an error while processing your question. Please try again or rephrase your question.",
       sources: [],
       confidence: 0,
       error: error.message
@@ -165,7 +173,7 @@ Answer:`;
 };
 
 // Generate a general response (without specific document context)
-export const generateGeneralResponse = async (query, conversationHistory = []) => {
+export const generateGeneralResponse = async (query, conversationHistory = [], userApiKey = null) => {
   try {
     // Search across all documents for relevant context
     let relevantChunks = [];
@@ -217,7 +225,7 @@ Please provide a helpful educational response in a conversational, professional 
     const model = getModel();
     console.log(`🤖 Calling OpenRouter API with model: ${model}`);
     
-    const openRouterClient = createOpenRouterClient();
+    const openRouterClient = createOpenRouterClient(userApiKey);
     const response = await openRouterClient.post('/chat/completions', {
       model: model,
       messages: [
@@ -238,6 +246,8 @@ Please provide a helpful educational response in a conversational, professional 
     console.log('✅ OpenRouter API response received');
     const aiResponse = response.data.choices[0].message.content;
 
+    const isDegraded = relevantChunks.some(chunk => chunk.degraded);
+
     return {
       response: aiResponse,
       sources: relevantChunks.map(chunk => ({
@@ -245,7 +255,8 @@ Please provide a helpful educational response in a conversational, professional 
         documentId: chunk.documentId,
         similarity: chunk.similarity
       })),
-      confidence: relevantChunks.length > 0 ? 75 : 50,
+      confidence: isDegraded ? null : (relevantChunks.length > 0 ? 75 : 50),
+      degraded: isDegraded,
       model: model
     };
 
@@ -258,7 +269,9 @@ Please provide a helpful educational response in a conversational, professional 
     });
     
     return {
-      response: "I'm sorry, I encountered an error while processing your question. Please try again.",
+      response: error.message === 'OpenRouter API key not configured'
+        ? "No AI API key is configured. Please add your OpenRouter API key in Settings to start chatting."
+        : "I'm sorry, I encountered an error while processing your question. Please try again.",
       sources: [],
       confidence: 0,
       error: error.message
@@ -267,7 +280,7 @@ Please provide a helpful educational response in a conversational, professional 
 };
 
 // Suggest questions based on document content
-export const suggestQuestions = async (documentId) => {
+export const suggestQuestions = async (documentId, userApiKey = null) => {
   try {
     const document = await dbUtils.getDocumentById(documentId);
     if (!document) {
@@ -297,7 +310,7 @@ Generate questions that are:
 Format as a simple list of questions:`;
 
     const model = getModel();
-    const openRouterClient = createOpenRouterClient();
+    const openRouterClient = createOpenRouterClient(userApiKey);
     const response = await openRouterClient.post('/chat/completions', {
       model: model,
       messages: [
@@ -338,7 +351,7 @@ Format as a simple list of questions:`;
 };
 
 // Summarize document content
-export const summarizeDocument = async (documentId) => {
+export const summarizeDocument = async (documentId, userApiKey = null) => {
   try {
     const document = await dbUtils.getDocumentById(documentId);
     if (!document) {
@@ -370,7 +383,7 @@ Summary requirements:
 Summary:`;
 
     const model = getModel();
-    const openRouterClient = createOpenRouterClient();
+    const openRouterClient = createOpenRouterClient(userApiKey);
     const response = await openRouterClient.post('/chat/completions', {
       model: model,
       messages: [
