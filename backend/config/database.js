@@ -1,4 +1,4 @@
-import sqlite3 from 'sqlite3';
+import Database from 'better-sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -7,43 +7,21 @@ const __dirname = path.dirname(__filename);
 
 // Create database connection
 const dbPath = process.env.DATABASE_URL || path.join(__dirname, '../database.sqlite');
-const db = new sqlite3.Database(dbPath);
+const db = new Database(dbPath);
 
-// Create proper async wrapper functions for SQLite3
-db.runAsync = (sql, params = []) => {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function(err) {
-      if (err) {
-        reject(err);
-      } else {
-        resolve({ lastID: this.lastID, changes: this.changes });
-      }
-    });
-  });
+// Async wrapper functions (better-sqlite3 is synchronous under the hood,
+// but we keep the same async interface so callers don't need to change)
+db.runAsync = async (sql, params = []) => {
+  const result = db.prepare(sql).run(params);
+  return { lastID: result.lastInsertRowid, changes: result.changes };
 };
 
-db.getAsync = (sql, params = []) => {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-      if (err) {
-        reject(err);
-      } else {
-        resolve(row);
-      }
-    });
-  });
+db.getAsync = async (sql, params = []) => {
+  return db.prepare(sql).get(params);
 };
 
-db.allAsync = (sql, params = []) => {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) {
-        reject(err);
-      } else {
-        resolve(rows);
-      }
-    });
-  });
+db.allAsync = async (sql, params = []) => {
+  return db.prepare(sql).all(params);
 };
 
 // Initialize database tables
@@ -51,7 +29,7 @@ export const initializeDatabase = async () => {
   try {
     // Enable foreign keys
     await db.runAsync('PRAGMA foreign_keys = ON');
-    
+
     // Users table
     await db.runAsync(`
       CREATE TABLE IF NOT EXISTS users (
@@ -197,7 +175,7 @@ export const dbUtils = {
   async updateDocumentStatus(id, status, error = null) {
     const processed = status === 'ready';
     await db.runAsync(
-      'UPDATE documents SET processed = ?, processing_status = ?, processing_error = ? WHERE id = ?', 
+      'UPDATE documents SET processed = ?, processing_status = ?, processing_error = ? WHERE id = ?',
       [processed, status, error, id]
     );
   },
