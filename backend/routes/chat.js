@@ -55,6 +55,8 @@ router.post('/message', validateMessage, asyncHandler(async (req, res) => {
 
   const { message, documentId, conversationId } = req.body;
   const userId = req.user.id;
+  const requestingUser = await dbUtils.getUserById(userId);
+  const userApiKey = requestingUser?.openrouter_api_key || null;
 
   // Verify document ownership if documentId is provided
   if (documentId) {
@@ -87,9 +89,9 @@ router.post('/message', validateMessage, asyncHandler(async (req, res) => {
     // Generate AI response
     let aiResult;
     if (documentId) {
-      aiResult = await generateDocumentResponse(message, documentId, conversationHistory);
+      aiResult = await generateDocumentResponse(message, documentId, conversationHistory, userApiKey);
     } else {
-      aiResult = await generateGeneralResponse(message, conversationHistory);
+      aiResult = await generateGeneralResponse(message, conversationHistory, userApiKey);
     }
 
     // Save AI response
@@ -189,7 +191,8 @@ router.get('/documents/:id/suggestions', asyncHandler(async (req, res) => {
     throw new AppError('Access denied', 403, 'ACCESS_DENIED');
   }
 
-  const suggestions = await suggestQuestions(documentId);
+  const requestingUser = await dbUtils.getUserById(req.user.id);
+  const suggestions = await suggestQuestions(documentId, requestingUser?.openrouter_api_key || null);
 
   res.json({
     documentId,
@@ -215,7 +218,8 @@ router.get('/documents/:id/summary', asyncHandler(async (req, res) => {
     throw new AppError('Access denied', 403, 'ACCESS_DENIED');
   }
 
-  const summary = await summarizeDocument(documentId);
+  const requestingUser = await dbUtils.getUserById(req.user.id);
+  const summary = await summarizeDocument(documentId, requestingUser?.openrouter_api_key || null);
 
   res.json({
     documentId,

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Brain, Mail, Lock, Eye, EyeOff } from 'lucide-react';
 import apiService from '../services/api';
+import { API_BASE_URL } from '../config';
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -113,9 +114,7 @@ const Login = () => {
           <div className="mt-6 text-center">
             <button
               onClick={() => {
-                const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-                const baseUrl = isLocal ? 'http://localhost:3001' : 'https://s81-docu-genie.onrender.com';
-                window.location.href = `${baseUrl}/api/auth/google`;
+                window.location.href = `${API_BASE_URL}/auth/google`;
               }}
               className="w-full py-3 bg-white text-gray-800 font-semibold rounded-lg flex items-center justify-center gap-2 shadow hover:bg-gray-100 transition-all duration-200 mb-4"
             >

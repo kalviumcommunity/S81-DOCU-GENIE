@@ -5,16 +5,22 @@ import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import crypto from 'crypto';
 import { dbUtils } from '../config/database.js';
 
+const defaultCallbackUrl = process.env.NODE_ENV === 'production'
+  ? 'https://s81-docu-genie.onrender.com/api/auth/google/callback'
+  : 'http://localhost:3001/api/auth/google/callback';
+
 passport.use(new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: process.env.NODE_ENV === 'production' 
-      ? 'https://s81-docu-genie.onrender.com/api/auth/google/callback'
-      : 'http://localhost:3001/api/auth/google/callback',
+    callbackURL: process.env.BACKEND_URL
+      ? `${process.env.BACKEND_URL}/api/auth/google/callback`
+      : defaultCallbackUrl,
   },
   async (accessToken, refreshToken, profile, done) => {
     try {
-      console.log('🔍 Google profile received:', JSON.stringify(profile, null, 2));
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('🔍 Google profile received for:', profile.emails?.[0]?.value);
+      }
       // Find or create user in your database
       const email = profile.emails && profile.emails[0] ? profile.emails[0].value : null;
       if (!email) {

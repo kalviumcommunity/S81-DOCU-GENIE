@@ -1,17 +1,28 @@
-const API_BASE_URL =
-  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-    ? 'http://localhost:3001/api'
-    : 'https://s81-docu-genie.onrender.com/api';
+import { API_BASE_URL } from '../config.js';
 
 // Helper function to get auth token
 const getAuthToken = () => {
   return localStorage.getItem('token');
 };
 
+// Clears auth state and sends the user back to /login. Used whenever the
+// backend tells us the current token is no longer valid.
+const forceLogout = () => {
+  localStorage.removeItem('token');
+  localStorage.removeItem('isAuthenticated');
+  localStorage.removeItem('user');
+  if (window.location.pathname !== '/login') {
+    window.location.href = '/login';
+  }
+};
+
 // Helper function to handle API responses
 const handleResponse = async (response) => {
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
+    if (response.status === 401 || response.status === 403) {
+      forceLogout();
+    }
     throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
   }
   return response.json();
@@ -189,6 +200,41 @@ class ApiService {
 
   async getDocumentSummary(documentId) {
     const response = await fetch(`${API_BASE_URL}/chat/documents/${documentId}/summary`, {
+      headers: {
+        'Authorization': `Bearer ${getAuthToken()}`,
+      },
+    });
+
+    return handleResponse(response);
+  }
+
+  // API key management
+  async getProfile() {
+    const response = await fetch(`${API_BASE_URL}/user/profile`, {
+      headers: {
+        'Authorization': `Bearer ${getAuthToken()}`,
+      },
+    });
+
+    return handleResponse(response);
+  }
+
+  async updateApiKey(apiKey) {
+    const response = await fetch(`${API_BASE_URL}/user/api-key`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${getAuthToken()}`,
+      },
+      body: JSON.stringify({ apiKey }),
+    });
+
+    return handleResponse(response);
+  }
+
+  async deleteApiKey() {
+    const response = await fetch(`${API_BASE_URL}/user/api-key`, {
+      method: 'DELETE',
       headers: {
         'Authorization': `Bearer ${getAuthToken()}`,
       },

@@ -60,10 +60,17 @@ export const initializeDatabase = async () => {
         email TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
         auth_provider TEXT DEFAULT 'local',
+        openrouter_api_key TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    // Older databases won't have this column yet - add it if missing.
+    const userColumns = await db.allAsync("PRAGMA table_info(users)");
+    if (!userColumns.some(col => col.name === 'openrouter_api_key')) {
+      await db.runAsync('ALTER TABLE users ADD COLUMN openrouter_api_key TEXT');
+    }
 
     // Documents table
     await db.runAsync(`
@@ -154,6 +161,13 @@ export const dbUtils = {
 
   async getUserById(id) {
     return await db.getAsync('SELECT * FROM users WHERE id = ?', [id]);
+  },
+
+  async updateUserApiKey(id, apiKey) {
+    await db.runAsync(
+      'UPDATE users SET openrouter_api_key = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [apiKey, id]
+    );
   },
 
   // Document operations

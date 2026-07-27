@@ -1,5 +1,6 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
+import fs from 'fs/promises';
 import { body, validationResult } from 'express-validator';
 import { dbUtils } from '../config/database.js';
 import { asyncHandler, AppError } from '../middleware/errorHandler.js';
@@ -23,6 +24,7 @@ router.get('/profile', asyncHandler(async (req, res) => {
       id: user.id,
       username: user.username,
       email: user.email,
+      hasApiKey: Boolean(user.openrouter_api_key),
       createdAt: user.created_at,
       updatedAt: user.updated_at
     },
@@ -168,6 +170,40 @@ router.patch('/password', [
   });
 }));
 
+// Set or update the user's own OpenRouter API key
+router.patch('/api-key', [
+  body('apiKey')
+    .trim()
+    .isLength({ min: 10, max: 200 })
+    .withMessage('API key looks invalid')
+], asyncHandler(async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      error: 'Validation failed',
+      code: 'VALIDATION_ERROR',
+      details: errors.array()
+    });
+  }
+
+  await dbUtils.updateUserApiKey(req.user.id, req.body.apiKey.trim());
+
+  res.json({
+    message: 'API key saved successfully',
+    hasApiKey: true
+  });
+}));
+
+// Remove the user's own OpenRouter API key (falls back to the server default)
+router.delete('/api-key', asyncHandler(async (req, res) => {
+  await dbUtils.updateUserApiKey(req.user.id, null);
+
+  res.json({
+    message: 'API key removed successfully',
+    hasApiKey: false
+  });
+}));
+
 // Get user dashboard data
 router.get('/dashboard', asyncHandler(async (req, res) => {
   const userId = req.user.id;
@@ -237,6 +273,16 @@ router.delete('/account', [
   if (!isPasswordValid) {
     throw new AppError('Password is incorrect', 400, 'INVALID_PASSWORD');
   }
+
+  // Physical files aren't cascade-deleted with the DB rows, so unlink them
+  // from disk before removing the user (whose document rows are about to
+  // disappear via ON DELETE CASCADE).
+  const documents = await dbUtils.getDocumentsByUserId(userId);
+  await Promise.all(documents.map(doc =>
+    fs.unlink(doc.file_path).catch((err) =>
+      console.error(`Failed to delete file for document ${doc.id}:`, err.message)
+    )
+  ));
 
   // Delete user (will cascade delete all related data)
   await dbUtils.db.runAsync('DELETE FROM users WHERE id = ?', [userId]);

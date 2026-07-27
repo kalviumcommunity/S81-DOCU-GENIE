@@ -55,6 +55,36 @@ const upload = multer({
   }
 });
 
+// Magic-byte signatures for the file types we accept. The client-supplied
+// Content-Type (checked in fileFilter above) is trivially spoofable, so we
+// also verify the actual file content once it's on disk.
+const FILE_SIGNATURES = {
+  'application/pdf': [Buffer.from('%PDF-', 'ascii')],
+  // .doc (legacy OLE2 container)
+  'application/msword': [Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1])],
+  // .docx is a zip archive (PK\x03\x04)
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': [
+    Buffer.from([0x50, 0x4b, 0x03, 0x04])
+  ]
+};
+
+const verifyFileSignature = async (filePath, mimetype) => {
+  const signatures = FILE_SIGNATURES[mimetype];
+  if (!signatures) return false;
+
+  const handle = await fs.open(filePath, 'r');
+  try {
+    const maxLen = Math.max(...signatures.map(sig => sig.length));
+    const buffer = Buffer.alloc(maxLen);
+    const { bytesRead } = await handle.read(buffer, 0, maxLen, 0);
+    return signatures.some(sig =>
+      bytesRead >= sig.length && buffer.subarray(0, sig.length).equals(sig)
+    );
+  } finally {
+    await handle.close();
+  }
+};
+
 // Upload file endpoint
 router.post('/upload', upload.single('file'), asyncHandler(async (req, res) => {
   if (!req.file) {
@@ -62,6 +92,12 @@ router.post('/upload', upload.single('file'), asyncHandler(async (req, res) => {
   }
 
   const { filename, originalname, path: filePath, size, mimetype } = req.file;
+
+  const validSignature = await verifyFileSignature(filePath, mimetype);
+  if (!validSignature) {
+    await fs.unlink(filePath).catch((err) => console.error('Failed to clean up rejected upload:', err));
+    throw new AppError('File content does not match its declared type.', 400, 'INVALID_FILE_CONTENT');
+  }
 
   try {
     // Save file info to database
@@ -199,8 +235,15 @@ router.get('/:id/download', asyncHandler(async (req, res) => {
     // Check if file exists
     await fs.access(document.file_path);
     
-    // Set appropriate headers
-    res.setHeader('Content-Disposition', `attachment; filename="${document.original_name}"`);
+    // Set appropriate headers. original_name is user-supplied at upload time,
+    // so it's sanitized/encoded before being placed in a response header to
+    // avoid header injection or a malformed Content-Disposition value.
+    const safeAsciiName = document.original_name.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, "'");
+    const encodedName = encodeURIComponent(document.original_name);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${safeAsciiName}"; filename*=UTF-8''${encodedName}`
+    );
     res.setHeader('Content-Type', document.mime_type);
     
     // Send file
